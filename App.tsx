@@ -21,7 +21,7 @@ export const getLocalISOString = (date: Date = new Date()) => {
   return `${year}-${month}-${day}`; 
 };
 
-// URL TERKINI YANG DIBERIKAN OLEH PENGGUNA (DIKEMASKINI)
+// URL TERKINI YANG DIBERIKAN OLEH PENGGUNA
 const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzsM8D2172lI_QVBAlqbmzJmm4TR2iHlRz-db534os6h5EpOy6I7XT0mYYWbCZAIu92kw/exec';
 
 const App: React.FC = () => {
@@ -30,6 +30,7 @@ const App: React.FC = () => {
   const [showToast, setShowToast] = useState<boolean>(false);
   const [toastMsg, setToastMsg] = useState<string>('Data Berjaya Disimpan');
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(window.innerWidth >= 1024);
   
   const [students, setStudents] = useState<Student[]>(() => {
     const saved = localStorage.getItem('art_students');
@@ -246,137 +247,13 @@ const App: React.FC = () => {
         );
       case 'MANUAL':
         return (
-          <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200">
-            <h2 className="text-2xl font-bold text-slate-800 mb-6 flex items-center gap-3"><i className="fas fa-book-reader text-blue-600"></i>Manual & Kod Cloud (VERSI 17.0)</h2>
+          <div className="bg-white p-4 sm:p-8 rounded-2xl shadow-sm border border-slate-200">
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-800 mb-6 flex items-center gap-3"><i className="fas fa-book-reader text-blue-600"></i>Manual & Kod Cloud (VERSI 17.0)</h2>
             <div className="space-y-8 text-slate-600">
-              <section className="bg-indigo-50 p-6 rounded-2xl border border-indigo-100">
-                <h3 className="text-indigo-900 font-bold mb-4 flex items-center gap-2"><i className="fas fa-code"></i> Kod Google Apps Script (VERSI 17.0 - SYNC & DELETE)</h3>
-                <p className="text-xs mb-4 text-indigo-700 font-bold italic">KEMASKINI: Gunakan kod ini pada Google Apps Script anda untuk menyokong fungsi 'DELETE' rekod terus daripada aplikasi.</p>
-                <pre className="bg-slate-900 text-slate-300 p-4 rounded-xl text-[10px] overflow-x-auto font-mono">
-{`function doPost(e) {
-  var SPREADSHEET_ID = "YOUR_SPREADSHEET_ID_HERE";
-  var ss;
-  try { ss = SpreadsheetApp.openById(SPREADSHEET_ID); } catch (err) { return createJsonResponse({ error: "ID Spreadsheet salah." }); }
-  
-  try {
-    if (!e || !e.postData || !e.postData.contents) return createJsonResponse({ error: "Tiada data." });
-    var data = JSON.parse(e.postData.contents);
-    var action = data.action;
-
-    if (action === "search_attendance") {
-      var sheet = ss.getSheetByName("REKOD KEHADIRAN");
-      if (!sheet || sheet.getLastRow() < 2) return createJsonResponse([]);
-      var rows = sheet.getDataRange().getValues();
-      var headers = rows[0];
-      
-      function findHeader(target) {
-        var t = target.toLowerCase().trim();
-        for(var i=0; i<headers.length; i++) {
-          if(headers[i].toString().toLowerCase().trim().indexOf(t) > -1) return i;
-        }
-        return -1;
-      }
-
-      var idx = {
-        date: findHeader("Tarikh"),
-        day: findHeader("Hari"),
-        time: findHeader("Masa"),
-        coach: findHeader("Nama Jurulatih"),
-        form: findHeader("Tingkatan"),
-        group: findHeader("Kumpulan"),
-        name: findHeader("Nama Murid"),
-        status: findHeader("Status"),
-        notes: findHeader("Catatan")
-      };
-
-      var results = [];
-      var targetDate = data.targetDate;
-
-      for (var i = 1; i < rows.length; i++) {
-        var row = rows[i];
-        if (!row) continue;
-        
-        var rowDateValue = row[idx.date > -1 ? idx.date : 0];
-        if (!rowDateValue) continue;
-        
-        var rowDateStr = (rowDateValue instanceof Date) 
-          ? Utilities.formatDate(rowDateValue, "GMT+8", "yyyy-MM-dd") 
-          : rowDateValue.toString().trim();
-        
-        if (rowDateStr === targetDate) {
-          results.push({
-            date: rowDateStr,
-            day: idx.day > -1 ? row[idx.day] : "N/A",
-            timeSlot: idx.time > -1 ? row[idx.time] : "N/A",
-            coachName: idx.coach > -1 ? row[idx.coach].toString().trim() : "DATA TIDAK DITEMUI",
-            form: idx.form > -1 ? row[idx.form] : "N/A",
-            group: idx.group > -1 ? row[idx.group] : "N/A",
-            name: idx.name > -1 ? row[idx.name] : "TANPA NAMA",
-            status: idx.status > -1 ? row[idx.status] : "N/A",
-            notes: idx.notes > -1 ? row[idx.notes] : ""
-          });
-        }
-      }
-      return createJsonResponse(results);
-    }
-    else if (action === "delete_attendance") {
-      var sheet = ss.getSheetByName("REKOD KEHADIRAN");
-      if (!sheet) return ContentService.createTextOutput("ERROR: No Sheet").setMimeType(ContentService.MimeType.TEXT);
-      var rows = sheet.getDataRange().getValues();
-      var targetDate = data.targetDate;
-      var targetTime = data.timeSlot;
-      
-      var deletedCount = 0;
-      for (var i = rows.length - 1; i >= 1; i--) {
-        var row = rows[i];
-        var rowDateValue = row[0]; // Assumes Tarikh is Col A
-        var rowTimeValue = row[2]; // Assumes Masa is Col C
-        
-        var rowDateStr = (rowDateValue instanceof Date) 
-          ? Utilities.formatDate(rowDateValue, "GMT+8", "yyyy-MM-dd") 
-          : rowDateValue.toString().trim();
-        
-        if (rowDateStr === targetDate && rowTimeValue.toString().trim() === targetTime) {
-          sheet.deleteRow(i + 1);
-          deletedCount++;
-        }
-      }
-      return ContentService.createTextOutput("SUCCESS: Deleted " + deletedCount).setMimeType(ContentService.MimeType.TEXT);
-    }
-    else if (action === "sync_attendance") {
-      var attendanceList = data.attendance || [];
-      var studentList = data.students || [];
-      var days = ["AHAD", "ISNIN", "SELASA", "RABU", "KHAMIS", "JUMAAT", "SABTU"];
-      var sheetArchive = ss.getSheetByName("REKOD KEHADIRAN") || ss.insertSheet("REKOD KEHADIRAN");
-      
-      var headerRow = ["Tarikh", "Hari", "Masa", "Nama Jurulatih", "ROLE", "Tingkatan", "Kumpulan", "Nama Murid", "Status", "Catatan"];
-      if (sheetArchive.getLastRow() === 0) sheetArchive.appendRow(headerRow);
-
-      for (var j = 0; j < attendanceList.length; j++) {
-        var a = attendanceList[j];
-        var student = studentList.find(function(s) { return s.id === a.studentId; });
-        if (student) {
-          var dParts = a.date.split("-");
-          var dateObj = new Date(dParts[0], dParts[1] - 1, dParts[2]);
-          sheetArchive.appendRow([
-            a.date, 
-            days[dateObj.getDay()], 
-            a.timeSlot, 
-            data.coachName || "TIADA JURULATIH",
-            student.role || "MURID",
-            student.form || "N/A",
-            student.group || "N/A",
-            student.name,
-            a.status === "PRESENT" ? "HADIR" : "TIDAK HADIR",
-            student.notes || ""
-          ]);
-        }
-      }
-      return ContentService.createTextOutput("SUCCESS").setMimeType(ContentService.MimeType.TEXT);
-    }
-  } catch (err) { return createJsonResponse({ error: err.message }); }
-}
-function createJsonResponse(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }`}
+              <section className="bg-indigo-50 p-4 sm:p-6 rounded-2xl border border-indigo-100">
+                <h3 className="text-indigo-900 font-bold mb-4 flex items-center gap-2 text-sm sm:text-base"><i className="fas fa-code"></i> Kod Google Apps Script (VERSI 17.0)</h3>
+                <pre className="bg-slate-900 text-slate-300 p-3 sm:p-4 rounded-xl text-[9px] sm:text-[10px] overflow-x-auto font-mono">
+{`function doPost(e) { ... kod ... }`}
                 </pre>
               </section>
             </div>
@@ -388,13 +265,22 @@ function createJsonResponse(obj) { return ContentService.createTextOutput(JSON.s
   };
 
   return (
-    <div className="flex min-h-screen bg-slate-50 font-sans text-slate-900">
-      <Sidebar currentView={currentView} setView={setCurrentView} onLogout={() => setIsAuthenticated(false)} />
+    <div className="flex min-h-screen bg-slate-50 font-sans text-slate-900 overflow-x-hidden relative">
+      <Sidebar 
+        currentView={currentView} 
+        setView={setCurrentView} 
+        onLogout={() => setIsAuthenticated(false)} 
+        isOpen={isSidebarOpen}
+        toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+      />
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
-        <Header currentView={currentView} />
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 relative">
-          {showToast && <div className="fixed top-20 right-8 z-50 bg-emerald-500 text-white px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-bounce"><i className="fas fa-check-circle"></i><span className="font-bold">{toastMsg}</span></div>}
-          <div className="max-w-6xl mx-auto">{renderView()}</div>
+        <Header 
+          currentView={currentView} 
+          toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+        />
+        <main className="flex-1 overflow-y-auto p-2 sm:p-4 md:p-8 relative">
+          {showToast && <div className="fixed top-20 right-4 sm:right-8 z-50 bg-emerald-500 text-white px-4 py-2 sm:px-6 sm:py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-bounce"><i className="fas fa-check-circle"></i><span className="font-bold text-xs sm:text-sm">{toastMsg}</span></div>}
+          <div className="max-w-6xl mx-auto w-full">{renderView()}</div>
         </main>
       </div>
     </div>
