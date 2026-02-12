@@ -1,7 +1,8 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import CustomCalendar from './CustomCalendar';
-import { AttendanceRecord } from '../types';
+import { AttendanceRecord, Group } from '../types';
+import { GROUPS, COACHES } from '../constants';
 
 interface ArchiveResult {
   date: string;
@@ -18,6 +19,7 @@ interface ArchiveResult {
 interface ArchiveSearchProps {
   googleScriptUrl: string;
   attendance: AttendanceRecord[];
+  spreadsheetId: string;
 }
 
 const TINGKATAN_MAP: Record<string, string> = {
@@ -28,8 +30,17 @@ const TINGKATAN_MAP: Record<string, string> = {
   '5': 'LIMA'
 };
 
-const ArchiveSearch: React.FC<ArchiveSearchProps> = ({ googleScriptUrl, attendance }) => {
+const TIME_SLOTS = [
+  '8:00 - 11:00',
+  '8:30 - 12:00',
+  '2:30 - 16:00'
+];
+
+const ArchiveSearch: React.FC<ArchiveSearchProps> = ({ googleScriptUrl, attendance, spreadsheetId }) => {
   const [searchDate, setSearchDate] = useState(new Date().toISOString().split('T')[0]);
+  const [filterGroup, setFilterGroup] = useState<Group | 'ALL'>('ALL');
+  const [filterCoach, setFilterCoach] = useState<string | 'ALL'>('ALL');
+  const [filterTime, setFilterTime] = useState<string | 'ALL'>('ALL');
   const [results, setResults] = useState<ArchiveResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -40,8 +51,17 @@ const ArchiveSearch: React.FC<ArchiveSearchProps> = ({ googleScriptUrl, attendan
     return new Set(attendance.map(a => a.date));
   }, [attendance]);
 
+  const filteredResults = useMemo(() => {
+    return results.filter(r => {
+      const matchesGroup = filterGroup === 'ALL' || r.group === filterGroup;
+      const matchesCoach = filterCoach === 'ALL' || r.coachName === filterCoach;
+      const matchesTime = filterTime === 'ALL' || r.timeSlot === filterTime;
+      return matchesGroup && matchesCoach && matchesTime;
+    });
+  }, [results, filterGroup, filterCoach, filterTime]);
+
   const groupedResults = useMemo(() => {
-    return results.reduce((acc, item) => {
+    return filteredResults.reduce((acc, item) => {
       const groupName = item.group || 'TIADA KUMPULAN';
       if (!acc[groupName]) {
         acc[groupName] = [];
@@ -49,7 +69,7 @@ const ArchiveSearch: React.FC<ArchiveSearchProps> = ({ googleScriptUrl, attendan
       acc[groupName].push(item);
       return acc;
     }, {} as Record<string, ArchiveResult[]>);
-  }, [results]);
+  }, [filteredResults]);
 
   const handleSearch = async () => {
     if (!googleScriptUrl) {
@@ -63,7 +83,11 @@ const ArchiveSearch: React.FC<ArchiveSearchProps> = ({ googleScriptUrl, attendan
       const response = await fetch(googleScriptUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'search_attendance', targetDate: searchDate }),
+        body: JSON.stringify({ 
+          action: 'search_attendance', 
+          spreadsheetId: spreadsheetId,
+          targetDate: searchDate 
+        }),
         redirect: 'follow'
       });
       if (!response.ok) throw new Error(`Ralat Pelayan: ${response.status}`);
@@ -87,12 +111,14 @@ const ArchiveSearch: React.FC<ArchiveSearchProps> = ({ googleScriptUrl, attendan
   };
 
   const handleDeleteArchive = async () => {
-    if (results.length === 0 || !googleScriptUrl) return;
+    if (filteredResults.length === 0 || !googleScriptUrl) return;
     
     const formattedDate = searchDate.split('-').reverse().join('-');
-    const timeSlot = results[0].timeSlot;
+    const timeSlot = filterTime === 'ALL' ? (filteredResults[0]?.timeSlot || 'SEMUA SESI') : filterTime;
+    const groupContext = filterGroup === 'ALL' ? "SEMUA KUMPULAN" : `KUMPULAN ${filterGroup}`;
+    const coachContext = filterCoach === 'ALL' ? "SEMUA JURULATIH" : `JURULATIH: ${filterCoach}`;
 
-    if (!confirm(`AMARAN KRITIKAL!\n\nAdakah anda pasti mahu MEMADAM SEMUA REKOD bagi tarikh ${formattedDate} dan sesi ${timeSlot} daripada Cloud Google Sheets? Tindakan ini tidak boleh diundur.`)) {
+    if (!confirm(`AMARAN PEMADAMAN REKOD!\n\nAdakah anda pasti mahu memadam rekod berikut daripada Google Sheets:\n\nTARIKH: ${formattedDate}\nSESI: ${timeSlot}\nKUMPULAN: ${groupContext}\n${coachContext}\n\nTindakan ini tidak boleh diundur!`)) {
       return;
     }
 
@@ -104,24 +130,37 @@ const ArchiveSearch: React.FC<ArchiveSearchProps> = ({ googleScriptUrl, attendan
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ 
           action: 'delete_attendance', 
+          spreadsheetId: spreadsheetId,
           targetDate: searchDate,
-          timeSlot: timeSlot
+          timeSlot: filterTime === 'ALL' ? '' : filterTime,
+          group: filterGroup === 'ALL' ? '' : filterGroup,
+          coachName: filterCoach === 'ALL' ? '' : filterCoach
         }),
       });
       
-      alert(`Rekod bagi ${formattedDate} (${timeSlot}) telah dipadam dari Cloud.`);
-      setResults([]);
-      setHasSearched(false);
+      alert(`Arahan pemadaman bagi ${formattedDate} telah dihantar ke Cloud. Sila klik "CARIAN ARKIB" semula untuk kemaskini paparan.`);
+      
+      if (filterGroup !== 'ALL' || filterTime !== 'ALL' || filterCoach !== 'ALL') {
+         setResults(prev => prev.filter(r => {
+           const matchesGroup = filterGroup === 'ALL' || r.group !== filterGroup;
+           const matchesTime = filterTime === 'ALL' || r.timeSlot !== filterTime;
+           const matchesCoach = filterCoach === 'ALL' || r.coachName !== filterCoach;
+           return matchesGroup && matchesTime && matchesCoach;
+         }));
+      } else {
+         setResults([]);
+         setHasSearched(false);
+      }
     } catch (error) {
       console.error("Delete error:", error);
-      alert("Gagal memadam rekod dari server.");
+      alert("Gagal memadam rekod. Sila periksa sambungan internet.");
     } finally {
       setIsDeleting(false);
     }
   };
 
   const handlePrintPDF = () => {
-    if (results.length === 0) return;
+    if (filteredResults.length === 0) return;
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
@@ -135,7 +174,6 @@ const ArchiveSearch: React.FC<ArchiveSearchProps> = ({ googleScriptUrl, attendan
       
       const numPart = firstRes?.form?.split(' ')[0] || '';
       const tingMain = TINGKATAN_MAP[numPart] || numPart || '-';
-      
       const groupDisplayName = groupName.replace(/^\d+\s*/, '');
       
       const maleCount = groupData.filter(r => 
@@ -266,17 +304,76 @@ const ArchiveSearch: React.FC<ArchiveSearchProps> = ({ googleScriptUrl, attendan
         <div className="lg:col-span-1 bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
           <div className="flex items-center gap-3 mb-6">
              <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600">
-               <i className="fas fa-calendar-alt text-lg"></i>
+               <i className="fas fa-filter text-lg"></i>
              </div>
-             <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight">Pemilihan Tarikh</h3>
+             <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight">Kriteria Carian Arkib</h3>
           </div>
-          <div className="flex justify-center mb-6">
-            <CustomCalendar selectedDate={searchDate} onDateChange={(d) => setSearchDate(d)} recordedDates={recordedDates} />
+          
+          <div className="space-y-5">
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">1. Pilih Tarikh</label>
+              <div className="flex justify-center mb-4">
+                <CustomCalendar selectedDate={searchDate} onDateChange={(d) => setSearchDate(d)} recordedDates={recordedDates} />
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">2. Kumpulan Murid</label>
+                <div className="relative">
+                  <select 
+                    className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-slate-700 text-xs appearance-none focus:ring-2 focus:ring-indigo-500 outline-none"
+                    value={filterGroup}
+                    onChange={(e) => setFilterGroup(e.target.value as Group | 'ALL')}
+                  >
+                    <option value="ALL">SEMUA KUMPULAN</option>
+                    {GROUPS.map(g => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                  <i className="fas fa-layer-group absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">3. Nama Jurulatih</label>
+                <div className="relative">
+                  <select 
+                    className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-slate-700 text-xs appearance-none focus:ring-2 focus:ring-indigo-500 outline-none"
+                    value={filterCoach}
+                    onChange={(e) => setFilterCoach(e.target.value)}
+                  >
+                    <option value="ALL">SEMUA JURULATIH</option>
+                    {COACHES.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                  </select>
+                  <i className="fas fa-chalkboard-teacher absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">4. Sesi / Masa</label>
+                <div className="relative">
+                  <select 
+                    className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-slate-700 text-xs appearance-none focus:ring-2 focus:ring-indigo-500 outline-none"
+                    value={filterTime}
+                    onChange={(e) => setFilterTime(e.target.value)}
+                  >
+                    <option value="ALL">SEMUA SESI</option>
+                    {TIME_SLOTS.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  <i className="fas fa-clock absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                </div>
+              </div>
+            </div>
+            
+            <button 
+              onClick={handleSearch} 
+              disabled={isSearching} 
+              className={`w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl shadow-xl transition-all uppercase tracking-widest text-xs flex items-center justify-center gap-3 ${isSearching ? 'opacity-70 active:scale-100' : 'active:scale-95'}`}
+            >
+              {isSearching ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-search"></i>}
+              {isSearching ? 'MENCARI DATA...' : 'CARIAN ARKIB'}
+            </button>
           </div>
-          <button onClick={handleSearch} disabled={isSearching} className={`w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl shadow-xl transition-all uppercase tracking-widest text-xs flex items-center justify-center gap-3 ${isSearching ? 'opacity-70' : ''}`}>
-            {isSearching ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-search"></i>}
-            {isSearching ? 'MENCARI...' : 'CARIAN ARKIB'}
-          </button>
+
           {errorMsg && (
             <div className="mt-4 p-4 bg-rose-50 border border-rose-100 rounded-2xl flex items-center gap-3 text-rose-700">
               <i className="fas fa-exclamation-triangle text-sm"></i>
@@ -284,13 +381,14 @@ const ArchiveSearch: React.FC<ArchiveSearchProps> = ({ googleScriptUrl, attendan
             </div>
           )}
         </div>
+
         <div className="lg:col-span-2 space-y-6">
           {!hasSearched ? (
-            <div className="bg-white p-20 rounded-3xl shadow-sm border border-slate-200 text-center flex flex-col items-center justify-center min-h-[400px]">
-              <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-6 text-slate-200">
-                <i className="fas fa-search-location text-4xl"></i>
+            <div className="bg-white p-20 rounded-3xl shadow-sm border border-slate-200 text-center flex flex-col items-center justify-center min-h-[500px]">
+              <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mb-6 text-slate-200">
+                <i className="fas fa-search-location text-5xl"></i>
               </div>
-              <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Sila Pilih Tarikh Dan Klik Carian</h3>
+              <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Pilih Tarikh, Kumpulan, Jurulatih Atau Masa Untuk Memulakan Carian Arkib.</h3>
             </div>
           ) : (
             <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
@@ -298,39 +396,36 @@ const ArchiveSearch: React.FC<ArchiveSearchProps> = ({ googleScriptUrl, attendan
                 <div className="bg-indigo-600 p-6 rounded-3xl shadow-xl flex flex-col md:flex-row justify-between items-center gap-6 text-white border-4 border-white/10">
                    <div className="flex items-center gap-5">
                      <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-md">
-                       <i className="fas fa-chalkboard-teacher text-2xl"></i>
+                       <i className="fas fa-database text-2xl"></i>
                      </div>
                      <div>
-                       <p className="text-[9px] font-black uppercase tracking-widest text-indigo-200 mb-1">Nama Jurulatih</p>
-                       <h2 className="text-lg md:text-xl font-black uppercase tracking-tight">{results[0].coachName}</h2>
+                       <p className="text-[9px] font-black uppercase tracking-widest text-indigo-200 mb-1">Status Carian Arkib</p>
+                       <h2 className="text-lg md:text-xl font-black uppercase tracking-tight">DATA CLOUD DITEMUI</h2>
                      </div>
                    </div>
                    <div className="flex flex-wrap gap-3 justify-center">
                      <div className="bg-white/10 px-4 py-2 rounded-xl border border-white/10 backdrop-blur-sm text-center min-w-[100px]">
-                       <p className="text-[8px] font-bold text-indigo-200 uppercase mb-0.5">Sesi</p>
-                       <p className="text-xs font-black">{results[0].timeSlot}</p>
-                     </div>
-                     <div className="bg-white/10 px-4 py-2 rounded-xl border border-white/10 backdrop-blur-sm text-center min-w-[100px]">
-                       <p className="text-[8px] font-bold text-indigo-200 uppercase mb-0.5">Tarikh</p>
-                       <p className="text-xs font-black">{searchDate.split('-').reverse().join('-')}</p>
+                       <p className="text-[8px] font-bold text-indigo-200 uppercase mb-0.5">Jumlah Rekod</p>
+                       <p className="text-xs font-black">{filteredResults.length}</p>
                      </div>
                      <div className="flex gap-2">
-                        <button onClick={handlePrintPDF} className="bg-white text-indigo-600 hover:bg-indigo-50 px-5 py-2 rounded-xl font-black shadow-lg transition-all uppercase tracking-widest text-[10px] flex items-center gap-2">
-                          <i className="fas fa-file-pdf"></i>PDF
+                        <button onClick={handlePrintPDF} disabled={filteredResults.length === 0} className="bg-white text-indigo-600 hover:bg-indigo-50 px-5 py-3 rounded-2xl font-black shadow-lg transition-all uppercase tracking-widest text-[10px] flex items-center gap-2">
+                          <i className="fas fa-file-pdf"></i>CETAK PDF
                         </button>
                         <button 
                           onClick={handleDeleteArchive} 
-                          disabled={isDeleting}
-                          className="bg-rose-600 text-white hover:bg-rose-700 px-5 py-2 rounded-xl font-black shadow-lg transition-all uppercase tracking-widest text-[10px] flex items-center gap-2"
+                          disabled={isDeleting || filteredResults.length === 0}
+                          className="bg-rose-600 text-white hover:bg-rose-700 px-5 py-3 rounded-2xl font-black shadow-lg transition-all uppercase tracking-widest text-[10px] flex items-center gap-2"
                         >
                           {isDeleting ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-trash-alt"></i>}
-                          DELETE
+                          PADAM REKOD
                         </button>
                      </div>
                    </div>
                 </div>
               )}
-              {results.length > 0 ? Object.keys(groupedResults).sort().map(groupName => (
+
+              {filteredResults.length > 0 ? Object.keys(groupedResults).sort().map(groupName => (
                 <div key={groupName} className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
                   <div className="p-5 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
                     <div className="flex items-center gap-3">
@@ -339,16 +434,23 @@ const ArchiveSearch: React.FC<ArchiveSearchProps> = ({ googleScriptUrl, attendan
                       </div>
                       <h3 className="text-xs font-black text-slate-800 uppercase tracking-tight">KUMPULAN: {groupName}</h3>
                     </div>
-                    <span className="text-[9px] bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full font-black">{groupedResults[groupName].length} MURID</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full font-black uppercase tracking-tighter">Sesi: {groupedResults[groupName][0].timeSlot}</span>
+                      <span className="text-[9px] bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full font-black">{groupedResults[groupName].length} MURID</span>
+                    </div>
+                  </div>
+                  <div className="p-4 bg-indigo-50/50 border-b border-indigo-100 flex items-center gap-2">
+                    <i className="fas fa-user-tie text-xs text-indigo-600"></i>
+                    <p className="text-[10px] font-bold text-slate-600 uppercase">Jurulatih: <span className="text-slate-900">{groupedResults[groupName][0].coachName}</span></p>
                   </div>
                   <div className="overflow-x-auto scrollbar-hide">
                     <table className="w-full text-left">
-                      <thead className="bg-yellow-400 text-black text-[9px] font-black uppercase tracking-widest border-b border-yellow-500">
+                      <thead className="bg-yellow-400 text-black text-[11px] font-bold uppercase tracking-widest border-b border-yellow-500">
                         <tr>
                           <th className="px-5 py-3 w-16">Bil</th>
                           <th className="px-5 py-3">Nama Murid</th>
                           <th className="px-5 py-3">Ting</th>
-                          <th className="px-5 py-3 text-center">Status</th>
+                          <th className="px-5 py-3 text-center">Status Kehadiran</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -373,7 +475,9 @@ const ArchiveSearch: React.FC<ArchiveSearchProps> = ({ googleScriptUrl, attendan
               )) : hasSearched && (
                 <div className="bg-white p-20 rounded-3xl shadow-sm border border-slate-200 text-center flex flex-col items-center justify-center min-h-[400px]">
                   <i className="fas fa-folder-open text-5xl text-slate-200 mb-6 block"></i>
-                  <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Tiada Data Arkib Ditemui.</p>
+                  <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">
+                    {results.length > 0 ? "Tiada rekod sepadan dengan kriteria carian anda." : "Tiada Data Arkib Ditemui bagi tarikh ini di Cloud."}
+                  </p>
                 </div>
               )}
             </div>
