@@ -12,7 +12,6 @@ import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import ArchiveSearch from './components/ArchiveSearch';
 
-// Fungsi Utiliti untuk mendapatkan tarikh YYYY-MM-DD zon masa tempatan
 export const getLocalISOString = (date: Date = new Date()) => {
   if (!date) return "";
   const year = date.getFullYear();
@@ -21,8 +20,9 @@ export const getLocalISOString = (date: Date = new Date()) => {
   return `${year}-${month}-${day}`; 
 };
 
-// URL TERKINI YANG DIBERIKAN OLEH PENGGUNA
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzsM8D2172lI_QVBAlqbmzJmm4TR2iHlRz-db534os6h5EpOy6I7XT0mYYWbCZAIu92kw/exec';
+// KEMASKINI: URL deployment baharu yang dibekalkan pengguna
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxje46YQpff6xm9GrjDBWNi4brRdt1Cib6h0dbwBa3Zkzd3pteiVtf0lZFJ-YkanhnLhA/exec';
+const SPREADSHEET_ID = '1Otr6yM4-Zx2ifK_s7Wd2ofu8pE05hN561zpqDM-RFCA';
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -74,18 +74,21 @@ const App: React.FC = () => {
         setIsSyncing(false);
         return;
       }
-      await fetch(GOOGLE_SCRIPT_URL, {
+      
+      const response = await fetch(GOOGLE_SCRIPT_URL, {
         method: 'POST',
-        mode: 'no-cors',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({
           action: 'sync_attendance',
+          spreadsheetId: SPREADSHEET_ID,
           timestamp: new Date().toISOString(),
           coachName: coachName,
           students: students,
           attendance: filteredAttendance
         }),
+        redirect: 'follow'
       });
+      
       notifySuccess('Berjaya Simpan ke Google Sheets!');
     } catch (error) {
       console.error('Error syncing:', error);
@@ -101,7 +104,11 @@ const App: React.FC = () => {
       const response = await fetch(GOOGLE_SCRIPT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'search_attendance', targetDate: date }),
+        body: JSON.stringify({ 
+          action: 'search_attendance', 
+          spreadsheetId: SPREADSHEET_ID,
+          targetDate: date 
+        }),
         redirect: 'follow'
       });
       const data = await response.json();
@@ -222,7 +229,7 @@ const App: React.FC = () => {
           />
         );
       case 'CARIAN_ARKIB':
-        return <ArchiveSearch googleScriptUrl={GOOGLE_SCRIPT_URL} attendance={attendance} />;
+        return <ArchiveSearch googleScriptUrl={GOOGLE_SCRIPT_URL} attendance={attendance} spreadsheetId={SPREADSHEET_ID} />;
       case 'DATA_MURID':
         return <StudentList students={students} onDelete={deleteStudent} onUpdateNotes={updateStudentNotes} onUpdateStudent={updateStudent} />;
       case 'TAMBAH_MURID':
@@ -235,6 +242,7 @@ const App: React.FC = () => {
             students={students} 
             attendance={attendance} 
             googleScriptUrl={GOOGLE_SCRIPT_URL}
+            spreadsheetId={SPREADSHEET_ID}
             onImportCloudData={(newRecords) => {
               setAttendance(prev => {
                 const existing = new Set(prev.map(p => `${p.studentId}-${p.date}-${p.timeSlot}`));
